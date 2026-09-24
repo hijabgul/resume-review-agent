@@ -1,13 +1,8 @@
 """
 resume_crew.py
 ----------------
-This file defines the "brain" of the app: a single CrewAI agent that
-compares a resume against a job description and returns a structured,
-honest evaluation.
-
-Beginner note: you do NOT need to edit this file to run the app.
-Everything a student needs to change (API key, model name) lives in
-Streamlit secrets, not here.
+This file defines the "brain" of the app: CrewAI agents that evaluate
+resumes either against a target job description or as a standalone ATS audit.
 """
 
 import json
@@ -18,11 +13,11 @@ from crewai import Agent, Task, Crew, Process, LLM
 from pydantic import BaseModel, Field, ValidationError
 
 # ---------------------------------------------------------------------------
-# 1. The shape of the answer we want back from the AI (structured output).
-#    Using a schema like this means we ALWAYS get clean, predictable fields
-#    to show in the UI, instead of parsing free-form paragraphs.
+# 1. Structured Output Schemas
 # ---------------------------------------------------------------------------
+
 class ResumeEvaluation(BaseModel):
+    """Schema for Job Description Match Evaluation."""
     match_score: int = Field(
         ..., ge=0, le=100,
         description="Overall match between the resume and the job description, 0-100."
@@ -48,8 +43,34 @@ class ResumeEvaluation(BaseModel):
     )
 
 
+class StandaloneATSEvaluation(BaseModel):
+    """Schema for Standalone ATS & Structural Quality Audit."""
+    ats_score: int = Field(
+        ..., ge=0, le=100,
+        description="Overall ATS formatting and structural quality score from 0 to 100 based on standard industry practices."
+    )
+    overall_summary: str = Field(
+        ..., description="Brief summary of the resume structure, strengths, and primary weaknesses."
+    )
+    strengths: List[str] = Field(
+        default_factory=list,
+        description="Key strengths found in the resume layout, content, or action-oriented writing."
+    )
+    formatting_issues: List[str] = Field(
+        default_factory=list,
+        description="Issues related to ATS readability (e.g., missing contact info, non-standard headers, complex layout, poor structure)."
+    )
+    impact_and_content_gaps: List[str] = Field(
+        default_factory=list,
+        description="Gaps in impact (e.g., lack of quantified metrics, weak action verbs, missing key professional sections)."
+    )
+    actionable_recommendations: List[str] = Field(
+        default_factory=list,
+        description="Specific steps the candidate should take to improve their overall ATS score and readability."
+    )
+
+
 # Model served on Groq's fast inference API (OpenAI's open-weight model).
-# CrewAI routes this through LiteLLM using the "groq/" provider prefix.
 GROQ_MODEL_ID = "groq/openai/gpt-oss-120b"
 
 
@@ -63,8 +84,12 @@ def build_llm(api_key: str) -> LLM:
     )
 
 
+# ---------------------------------------------------------------------------
+# 2. Crew Construction for Job Match Review
+# ---------------------------------------------------------------------------
+
 def build_crew(api_key: str) -> Crew:
-    """Assemble the single agent, its one task, and the crew that runs it."""
+    """Assemble the single agent, its one task, and the crew that runs job match analysis."""
     llm = build_llm(api_key)
 
     analyst = Agent(
@@ -129,13 +154,6 @@ def build_crew(api_key: str) -> Crew:
             "missing_or_weak_areas, recommendations, and ats_keywords_to_add."
         ),
         agent=analyst,
-        # Note: intentionally NOT using output_pydantic here. CrewAI's
-        # output_pydantic uses function/tool-calling to force structured
-        # output, and some Groq-hosted models (including gpt-oss-120b at
-        # the time of writing) throw "Tool choice is none, but model
-        # called a tool" errors with that path. Prompting for raw JSON
-        # and parsing it ourselves (see _extract_json / run_resume_review
-        # below) avoids that bug entirely and is more robust.
     )
 
     return Crew(
@@ -145,6 +163,77 @@ def build_crew(api_key: str) -> Crew:
         verbose=False,
     )
 
+
+# ---------------------------------------------------------------------------
+# 3. Crew Construction for Standalone ATS Review
+# ---------------------------------------------------------------------------
+
+def build_standalone_ats_crew(api_key: str) -> Crew:
+    """Assemble the agent and task for evaluating a standalone resume without a JD."""
+    llm = build_llm(api_key)
+
+    ats_auditor = Agent(
+        role="Senior ATS Compliance & Resume Auditor",
+        goal=(
+            "Perform a standalone evaluation of a candidate's resume for general "
+            "ATS compatibility, structure, impact, action verbs, and formatting "
+            "best practices without needing a specific job description."
+        ),
+        backstory=(
+            "You are an expert ATS optimization specialist and professional resume "
+            "writer. You have audited tens of thousands of resumes against major ATS "
+            "parsing engines (Greenhouse, Lever, Workday, Taleo). You provide "
+            "uncompromisingly honest, precise feedback on resume formatting, section headers, "
+            "quantifiable impact, and phrasing."
+        ),
+        llm=llm,
+        verbose=False,
+        allow_delegation=False,
+    )
+
+    task = Task(
+        description=(
+            "You will be given a CANDIDATE RESUME below.\n\n"
+            "=== CANDIDATE RESUME ===\n{resume_text}\n\n"
+            "Do the following:\n"
+            "1. Evaluate the overall ATS readiness, structure, readability, and impact of the resume.\n"
+            "2. Assign ats_score (0-100) based on industry standards (clarity, action verbs, quantified results, contact info presentability, standard section headers).\n"
+            "3. Summarize overall strengths and structural status in overall_summary (3-5 sentences).\n"
+            "4. List strengths: key formatting, structural, or narrative highlights of this resume.\n"
+            "5. List formatting_issues: potential ATS parsing red flags (missing sections, non-standard headers, unclear dates, contact detail issues).\n"
+            "6. List impact_and_content_gaps: areas where achievements lack metrics/numbers, overused weak verbs, or missing summaries.\n"
+            "7. List actionable_recommendations: concrete, practical steps to optimize the resume for any ATS scanner.\n\n"
+            "OUTPUT FORMAT — this is critical:\n"
+            "Respond with ONLY a single valid JSON object. No markdown code fences, "
+            "no ```json, no commentary or explanation before or after it — just the "
+            "raw JSON object, starting with { and ending with }. It must have exactly "
+            "these keys:\n"
+            '  "ats_score": integer from 0 to 100\n'
+            '  "overall_summary": string, 3-5 sentences\n'
+            '  "strengths": array of strings\n'
+            '  "formatting_issues": array of strings\n'
+            '  "impact_and_content_gaps": array of strings\n'
+            '  "actionable_recommendations": array of strings\n'
+        ),
+        expected_output=(
+            "A single raw JSON object (no markdown fences, no extra text) with the "
+            "keys ats_score, overall_summary, strengths, formatting_issues, "
+            "impact_and_content_gaps, and actionable_recommendations."
+        ),
+        agent=ats_auditor,
+    )
+
+    return Crew(
+        agents=[ats_auditor],
+        tasks=[task],
+        process=Process.sequential,
+        verbose=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4. Helper Functions & Runners
+# ---------------------------------------------------------------------------
 
 def _extract_json(raw_text: str) -> dict:
     """
@@ -167,10 +256,7 @@ def _extract_json(raw_text: str) -> dict:
 
 def run_resume_review(resume_text: str, job_description: str, api_key: str) -> ResumeEvaluation:
     """
-    Runs the crew once and returns a validated ResumeEvaluation object.
-    Raises whatever exception CrewAI/LiteLLM raises on failure — the
-    calling Streamlit code is responsible for catching and displaying
-    a friendly error message.
+    Runs the job match crew once and returns a validated ResumeEvaluation object.
     """
     crew = build_crew(api_key)
     result = crew.kickoff(inputs={
@@ -190,6 +276,33 @@ def run_resume_review(resume_text: str, job_description: str, api_key: str) -> R
 
     try:
         return ResumeEvaluation(**data)
+    except ValidationError as exc:
+        raise ValueError(
+            f"The AI's response didn't match the expected format: {exc}"
+        ) from exc
+
+
+def run_standalone_ats_review(resume_text: str, api_key: str) -> StandaloneATSEvaluation:
+    """
+    Runs the standalone ATS audit crew once and returns a validated StandaloneATSEvaluation object.
+    """
+    crew = build_standalone_ats_crew(api_key)
+    result = crew.kickoff(inputs={
+        "resume_text": resume_text.strip(),
+    })
+
+    raw_text = getattr(result, "raw", None) or str(result)
+
+    try:
+        data = _extract_json(raw_text)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError(
+            "The AI's response wasn't valid JSON, so it couldn't be read. "
+            "Please try again."
+        ) from exc
+
+    try:
+        return StandaloneATSEvaluation(**data)
     except ValidationError as exc:
         raise ValueError(
             f"The AI's response didn't match the expected format: {exc}"
