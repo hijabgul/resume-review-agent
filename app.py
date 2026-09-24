@@ -26,7 +26,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS — High Contrast & Modern UI
+# Custom CSS — Translucent Glassmorphism & Modern Dark UI
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -84,7 +84,7 @@ st.markdown(
             border: 1px solid rgba(45,212,191,0.35);
         }
 
-        /* Mode selector radio styling */
+        /* Mode selector card styling */
         .mode-card {
             background: rgba(15, 23, 42, 0.8);
             border: 1px solid rgba(56, 189, 248, 0.3);
@@ -176,7 +176,7 @@ st.markdown(
             font-size: 0.94rem;
         }
 
-        /* Score ring */
+        /* Score display */
         .score-wrap {
             display: flex;
             flex-direction: column;
@@ -221,7 +221,7 @@ st.markdown(
             color: #F8FAFC !important;
         }
 
-        /* Buttons */
+        /* Action Buttons */
         div.stButton > button {
             background: linear-gradient(135deg, #14B8A6, #3B82F6);
             color: white !important;
@@ -306,7 +306,7 @@ analysis_mode = st.radio(
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Input Section
+# Input Section (Text Paste & PDF Upload Toggle)
 # ---------------------------------------------------------------------------
 if analysis_mode == "🎯 Job Description Match":
     left_col, right_col = st.columns(2, gap="large")
