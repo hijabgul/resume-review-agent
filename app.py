@@ -1,27 +1,32 @@
 """
 app.py
 ------
-Streamlit front-end for the Resume Review Agent.
+Streamlit front-end for the Resume Review Agent with Dual Analysis Modes.
 """
 
 import time
 import streamlit as st
 
 from pdf_utils import extract_text_from_pdf, PDFExtractionError
-from resume_crew import run_resume_review, ResumeEvaluation
+from resume_crew import (
+    run_resume_review, 
+    run_standalone_ats_review, 
+    ResumeEvaluation, 
+    StandaloneATSEvaluation
+)
 
 # ---------------------------------------------------------------------------
 # Page config
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title="ResumeFit AI | Resume-to-Job Match Analyzer",
+    page_title="ResumeFit AI | Dual Resume & ATS Analyzer",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS — High Contrast & Clean UI
+# Custom CSS — High Contrast & Modern UI
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -79,6 +84,15 @@ st.markdown(
             border: 1px solid rgba(45,212,191,0.35);
         }
 
+        /* Mode selector radio styling */
+        .mode-card {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 12px;
+            padding: 1rem 1.2rem;
+            margin-bottom: 1.5rem;
+        }
+
         /* Section Headings */
         .section-header {
             color: #38BDF8 !important;
@@ -104,7 +118,7 @@ st.markdown(
             font-size: 0.95rem !important;
         }
         textarea::placeholder {
-            color: #94A3B8 !important; /* Bright, visible placeholder text */
+            color: #94A3B8 !important;
             opacity: 1 !important;
         }
         textarea:focus {
@@ -112,7 +126,7 @@ st.markdown(
             box-shadow: 0 0 0 1px #38BDF8 !important;
         }
 
-        /* File Uploader styling (PDF Upload Fix) */
+        /* File Uploader styling */
         [data-testid="stFileUploader"] {
             background-color: rgba(15, 23, 42, 0.85) !important;
             border: 1px dashed rgba(56, 189, 248, 0.4) !important;
@@ -245,7 +259,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# Hero header
+# Hero Header
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -253,9 +267,8 @@ st.markdown(
         <span class="hero-badge">AI RESUME ANALYST</span>
         <div class="hero-title">ResumeFit AI</div>
         <div class="hero-subtitle">
-            Paste or upload a candidate's resume and a target job description.
-            The agent compares them honestly — no invented skills — and gives
-            you a match score plus specific, actionable improvements.
+            Analyze your resume against a target job description or perform a standalone 
+            ATS quality and structure check.
         </div>
     </div>
     """,
@@ -263,7 +276,7 @@ st.markdown(
 )
 
 # ---------------------------------------------------------------------------
-# API key handling
+# API Key Handling
 # ---------------------------------------------------------------------------
 def get_api_key() -> str:
     try:
@@ -282,65 +295,106 @@ if not api_key:
     st.stop()
 
 # ---------------------------------------------------------------------------
-# Input section
+# Analysis Mode Selection
 # ---------------------------------------------------------------------------
-left_col, right_col = st.columns(2, gap="large")
+st.markdown('<div class="mode-card">', unsafe_allow_html=True)
+analysis_mode = st.radio(
+    "Choose Analysis Mode:",
+    ["🎯 Job Description Match", "📄 Standalone Resume & ATS Audit"],
+    horizontal=True,
+)
+st.markdown('</div>', unsafe_allow_html=True)
 
-with left_col:
+# ---------------------------------------------------------------------------
+# Input Section
+# ---------------------------------------------------------------------------
+if analysis_mode == "🎯 Job Description Match":
+    left_col, right_col = st.columns(2, gap="large")
+
+    with left_col:
+        st.markdown('<div class="section-header">📄 Candidate Resume</div>', unsafe_allow_html=True)
+        input_mode = st.radio(
+            "Provide resume:",
+            ["Paste text", "Upload PDF"],
+            horizontal=True,
+            label_visibility="collapsed",
+            key="jd_resume_mode"
+        )
+
+        resume_text = ""
+        if input_mode == "Paste text":
+            resume_text = st.text_area(
+                "Resume text",
+                height=280,
+                placeholder="Paste the full resume text here...",
+                label_visibility="collapsed",
+                key="jd_resume_text"
+            )
+        else:
+            uploaded_pdf = st.file_uploader("Upload resume PDF", type=["pdf"], label_visibility="collapsed", key="jd_pdf")
+            if uploaded_pdf is not None:
+                try:
+                    resume_text = extract_text_from_pdf(uploaded_pdf)
+                    st.success(f"Extracted {len(resume_text.split())} words from PDF.")
+                except PDFExtractionError as e:
+                    st.warning(str(e))
+
+    with right_col:
+        st.markdown('<div class="section-header">🎯 Target Job Description</div>', unsafe_allow_html=True)
+        job_description = st.text_area(
+            "Job description",
+            height=325,
+            placeholder="Paste the full job description here...",
+            label_visibility="collapsed",
+            key="jd_text"
+        )
+
+else:
+    # Standalone ATS Mode Layout
     st.markdown('<div class="section-header">📄 Candidate Resume</div>', unsafe_allow_html=True)
-    
     input_mode = st.radio(
-        "How will you provide the resume?",
+        "Provide resume:",
         ["Paste text", "Upload PDF"],
         horizontal=True,
         label_visibility="collapsed",
+        key="single_resume_mode"
     )
 
     resume_text = ""
+    job_description = ""
+
     if input_mode == "Paste text":
         resume_text = st.text_area(
             "Resume text",
-            height=280,
-            placeholder="Paste the full resume text here...",
+            height=300,
+            placeholder="Paste your resume text here for a standalone ATS analysis...",
             label_visibility="collapsed",
+            key="single_resume_text"
         )
     else:
-        uploaded_pdf = st.file_uploader("Upload resume PDF", type=["pdf"], label_visibility="collapsed")
+        uploaded_pdf = st.file_uploader("Upload resume PDF", type=["pdf"], label_visibility="collapsed", key="single_pdf")
         if uploaded_pdf is not None:
             try:
                 resume_text = extract_text_from_pdf(uploaded_pdf)
-                st.success(f"Extracted {len(resume_text.split())} words from the PDF.")
-                with st.expander("Preview extracted text"):
-                    st.text(resume_text[:2000] + ("..." if len(resume_text) > 2000 else ""))
+                st.success(f"Extracted {len(resume_text.split())} words from PDF.")
             except PDFExtractionError as e:
                 st.warning(str(e))
 
-with right_col:
-    st.markdown('<div class="section-header">🎯 Target Job Description</div>', unsafe_allow_html=True)
-    job_description = st.text_area(
-        "Job description",
-        height=325,
-        placeholder="Paste the full job description here...",
-        label_visibility="collapsed",
-    )
-
 st.write("")
-run_clicked = st.button("🔍 Analyze Match", use_container_width=False)
+run_clicked = st.button("🔍 Run Analysis", use_container_width=False)
 
 # ---------------------------------------------------------------------------
-# Run the agent + display results
+# Results Rendering Functions
 # ---------------------------------------------------------------------------
 def score_color(score: int) -> str:
     if score >= 75:
-        return "#2DD4BF"   # teal - strong match
+        return "#2DD4BF"   # teal
     if score >= 50:
-        return "#FBBF24"   # amber - partial match
-    return "#F87171"       # red - weak match
+        return "#FBBF24"   # amber
+    return "#F87171"       # red
 
-
-def render_result(result: ResumeEvaluation) -> None:
+def render_jd_result(result: ResumeEvaluation) -> None:
     color = score_color(result.match_score)
-
     st.write("")
     score_col, summary_col = st.columns([1, 2.2], gap="large")
 
@@ -349,7 +403,7 @@ def render_result(result: ResumeEvaluation) -> None:
             f"""
             <div class="glass-card score-wrap">
                 <div class="score-number" style="color:{color};">{result.match_score}<span style="font-size:1.4rem;">/100</span></div>
-                <div class="score-label">Overall Match Score</div>
+                <div class="score-label">Job Match Score</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -365,59 +419,77 @@ def render_result(result: ResumeEvaluation) -> None:
 
     with col_a:
         items = "".join(f"<li>{q}</li>" for q in result.matching_qualifications) or "<li>None identified.</li>"
-        st.markdown(
-            f'<div class="glass-card"><h4>✅ Matching Qualifications</h4><ul>{items}</ul></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="glass-card"><h4>✅ Matching Qualifications</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
 
         items = "".join(f"<li>{k}</li>" for k in result.ats_keywords_to_add) or "<li>None identified.</li>"
-        st.markdown(
-            f'<div class="glass-card"><h4>🔑 Keywords to Consider Adding</h4><ul>{items}</ul></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="glass-card"><h4>🔑 Keywords to Consider Adding</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
 
     with col_b:
         items = "".join(f"<li>{g}</li>" for g in result.missing_or_weak_areas) or "<li>None identified.</li>"
-        st.markdown(
-            f'<div class="glass-card"><h4>⚠️ Gaps vs. Job Description</h4><ul>{items}</ul></div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f'<div class="glass-card"><h4>⚠️ Gaps vs. Job Description</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
 
         items = "".join(f"<li>{r}</li>" for r in result.recommendations) or "<li>None identified.</li>"
+        st.markdown(f'<div class="glass-card"><h4>💡 Actionable Recommendations</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
+
+def render_standalone_result(result: StandaloneATSEvaluation) -> None:
+    color = score_color(result.ats_score)
+    st.write("")
+    score_col, summary_col = st.columns([1, 2.2], gap="large")
+
+    with score_col:
         st.markdown(
-            f'<div class="glass-card"><h4>💡 Actionable Recommendations</h4><ul>{items}</ul></div>',
+            f"""
+            <div class="glass-card score-wrap">
+                <div class="score-number" style="color:{color};">{result.ats_score}<span style="font-size:1.4rem;">/100</span></div>
+                <div class="score-label">General ATS Score</div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
+    with summary_col:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.markdown("#### Structural Audit Summary")
+        st.markdown(f'<div class="summary-box">{result.overall_summary}</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
+    col_a, col_b = st.columns(2, gap="large")
+
+    with col_a:
+        items = "".join(f"<li>{s}</li>" for s in result.strengths) or "<li>None identified.</li>"
+        st.markdown(f'<div class="glass-card"><h4>🌟 Resume Strengths</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
+
+        items = "".join(f"<li>{f}</li>" for f in result.formatting_issues) or "<li>No formatting issues found.</li>"
+        st.markdown(f'<div class="glass-card"><h4>🛠️ Formatting & ATS Issues</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
+
+    with col_b:
+        items = "".join(f"<li>{g}</li>" for g in result.impact_and_content_gaps) or "<li>None identified.</li>"
+        st.markdown(f'<div class="glass-card"><h4>📊 Content & Impact Gaps</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
+
+        items = "".join(f"<li>{r}</li>" for r in result.actionable_recommendations) or "<li>None identified.</li>"
+        st.markdown(f'<div class="glass-card"><h4>💡 Recommendations to Boost Score</h4><ul>{items}</ul></div>', unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Execution Logic
+# ---------------------------------------------------------------------------
 if run_clicked:
     if not resume_text or not resume_text.strip():
         st.warning("Please paste or upload a resume first.")
-    elif not job_description or not job_description.strip():
+    elif analysis_mode == "🎯 Job Description Match" and (not job_description or not job_description.strip()):
         st.warning("Please paste a job description first.")
     else:
-        with st.spinner("Analyzing resume against job description..."):
+        with st.spinner("Analyzing resume..."):
             try:
-                result = run_resume_review(resume_text, job_description, api_key)
-                render_result(result)
-            except Exception as e:
-                err_text = str(e).lower()
-                if "rate limit" in err_text or "429" in err_text:
-                    st.error(
-                        "🚦 The AI provider is rate-limiting requests right now. "
-                        "Please wait about a minute and try again."
-                    )
-                elif "authentic" in err_text or "api key" in err_text or "401" in err_text or "403" in err_text:
-                    st.error(
-                        "🔑 The Groq API key was rejected. Double-check "
-                        "`GROQ_API_KEY` in your Streamlit secrets."
-                    )
-                elif "timeout" in err_text:
-                    st.error("⏱️ The request timed out. Please try again.")
+                if analysis_mode == "🎯 Job Description Match":
+                    res = run_resume_review(resume_text, job_description, api_key)
+                    render_jd_result(res)
                 else:
-                    st.error(f"Something went wrong while analyzing the resume: {e}")
+                    res = run_standalone_ats_review(resume_text, api_key)
+                    render_standalone_result(res)
+            except Exception as e:
+                st.error(f"Something went wrong during analysis: {e}")
 
 st.markdown(
-    '<div class="footer-note">ResumeFit AI · Powered by CrewAI + Groq · Built for learning purposes</div>',
+    '<div class="footer-note">ResumeFit AI · Powered by CrewAI + Groq</div>',
     unsafe_allow_html=True,
 )
