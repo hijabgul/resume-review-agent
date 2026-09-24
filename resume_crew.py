@@ -1,8 +1,8 @@
 """
 resume_crew.py
 --------------
-Handles crew setup and execution with robust JSON parsing and control-character 
-sanitizing for Groq and OpenAI models.
+Handles crew setup and execution with strict scoring rubrics, zero-temperature 
+determinism, and robust JSON/control-character sanitizing for Groq/OpenAI models.
 """
 
 import json
@@ -17,20 +17,20 @@ from crewai import Agent, Task, Crew, Process, LLM
 # Pydantic Schemas
 # ---------------------------------------------------------------------------
 class ResumeEvaluation(BaseModel):
-    match_score: int = Field(description="Score out of 100 representing job fit match.")
-    overall_summary: str = Field(description="Executive summary of the candidate's alignment.")
-    matching_qualifications: List[str] = Field(description="Key strengths matching the job requirements.")
+    match_score: int = Field(description="Score out of 100 calculated using strict rubric weights.")
+    overall_summary: str = Field(description="Executive summary of candidate alignment.")
+    matching_qualifications: List[str] = Field(description="Key strengths matching job requirements.")
     missing_or_weak_areas: List[str] = Field(description="Gaps vs job requirements.")
-    ats_keywords_to_add: List[str] = Field(description="Keywords present in JD but missing in resume.")
-    recommendations: List[str] = Field(description="Actionable steps to improve the resume.")
+    ats_keywords_to_add: List[str] = Field(description="Missing JD keywords.")
+    recommendations: List[str] = Field(description="Actionable improvement steps.")
 
 class StandaloneATSEvaluation(BaseModel):
-    ats_score: int = Field(description="General ATS compatibility score out of 100.")
-    overall_summary: str = Field(description="Summary of overall structural and content quality.")
-    strengths: List[str] = Field(description="Key strengths of the resume layout/content.")
-    formatting_issues: List[str] = Field(description="Formatting or ATS parser risks detected.")
-    impact_and_content_gaps: List[str] = Field(description="Areas where bullet points or metrics are weak.")
-    actionable_recommendations: List[str] = Field(description="Concrete recommendations for improvement.")
+    ats_score: int = Field(description="General ATS compatibility score out of 100 based on rubric.")
+    overall_summary: str = Field(description="Summary of overall structural/content quality.")
+    strengths: List[str] = Field(description="Key strengths of resume layout and content.")
+    formatting_issues: List[str] = Field(description="Formatting or parsing risks detected.")
+    impact_and_content_gaps: List[str] = Field(description="Weak bullet points or missing metrics.")
+    actionable_recommendations: List[str] = Field(description="Concrete steps to improve ATS readiness.")
 
 
 # ---------------------------------------------------------------------------
@@ -57,14 +57,14 @@ def clean_and_parse_json(raw_output: str, target_class: Type[BaseModel]) -> Base
     try:
         data = json.loads(text, strict=False)
         return target_class(**data)
-    except (json.JSONDecodeError, ValidationError) as e:
+    except (json.JSONDecodeError, ValidationError):
         # Fallback sanitization if unescaped literal linebreaks break JSON syntax
         try:
             cleaned_text = re.sub(r'[\r\n\t]+', ' ', text)
             data = json.loads(cleaned_text, strict=False)
             return target_class(**data)
-        except Exception:
-            raise ValueError(f"The AI's response wasn't valid JSON ({str(e)}). Raw response: {text[:200]}...")
+        except Exception as e:
+            raise ValueError(f"Failed to parse model output into structured JSON: {str(e)}")
 
 
 # ---------------------------------------------------------------------------
@@ -74,27 +74,35 @@ def run_resume_review(resume_text: str, job_description: str, api_key: str) -> R
     llm = LLM(
         model="groq/openai/gpt-oss-120b",
         api_key=api_key,
-        temperature=0.2
+        temperature=0.0
     )
 
     evaluator = Agent(
-        role="Senior Technical Recruiter & ATS Specialist",
-        goal="Provide exact, structured JSON evaluations comparing candidate resumes to job descriptions.",
-        backstory="An expert recruiter skilled in matching talent to tech roles and ATS optimization.",
+        role="Strict ATS & Technical Recruiter Auditor",
+        goal="Evaluate candidate fit strictly using a standardized 100-point rubric.",
+        backstory="An objective recruitment algorithm focused on repeatable, bias-free evaluations.",
         verbose=False,
         llm=llm
     )
 
     prompt = f"""
-Analyze the candidate's resume against the target job description.
+Evaluate the candidate's resume against the target job description using this STRICT SCORING RUBRIC:
 
-Job Description:
+[SCORING RUBRIC - TOTAL 100 POINTS]
+1. Required Core Skills & Technologies: Up to 40 points
+2. Relevant Work Experience & Achievements: Up to 30 points
+3. ATS Keyword Alignment & Phrasing: Up to 15 points
+4. Measurable Metrics & Action Verbs: Up to 15 points
+
+Calculate the sum of all 4 categories to produce the final "match_score".
+
+Target Job Description:
 {job_description}
 
 Candidate Resume:
 {resume_text}
 
-CRITICAL: Output ONLY a single raw JSON object matching this exact structure:
+CRITICAL: Output ONLY a single valid raw JSON object matching this exact structure:
 {{
   "match_score": 75,
   "overall_summary": "Summary text...",
@@ -103,12 +111,12 @@ CRITICAL: Output ONLY a single raw JSON object matching this exact structure:
   "ats_keywords_to_add": ["keyword 1", "keyword 2"],
   "recommendations": ["recommendation 1", "recommendation 2"]
 }}
-Do NOT wrap in extra prose. Respond only with the JSON object.
+Do NOT output preambles, notes, or markdown wrappers. Output JSON only.
 """
 
     task = Task(
         description=prompt,
-        expected_output="Valid JSON matching the required structure.",
+        expected_output="Valid JSON matching the required schema.",
         agent=evaluator
     )
 
@@ -127,24 +135,32 @@ def run_standalone_ats_review(resume_text: str, api_key: str) -> StandaloneATSEv
     llm = LLM(
         model="groq/openai/gpt-oss-120b",
         api_key=api_key,
-        temperature=0.2
+        temperature=0.0
     )
 
     evaluator = Agent(
-        role="ATS Optimization Specialist & Resume Auditor",
-        goal="Audit candidate resumes for structural ATS compliance, formatting, and content strength.",
-        backstory="An expert ATS engineer who audits resume structure and readability.",
+        role="Senior ATS Architecture Auditor",
+        goal="Audit candidate resumes strictly using a standardized structural compliance rubric.",
+        backstory="An objective ATS audit system focused on deterministic document scoring.",
         verbose=False,
         llm=llm
     )
 
     prompt = f"""
-Perform a comprehensive standalone structural and content ATS audit on this resume:
+Perform a standalone ATS audit on this resume using this STRICT SCORING RUBRIC:
+
+[SCORING RUBRIC - TOTAL 100 POINTS]
+1. Contact Info & Essential Section Structure: Up to 25 points
+2. Technical & Professional Skills Clarity: Up to 25 points
+3. Work Experience Detail & Measurable Metrics: Up to 25 points
+4. ATS Readability & Clean Layout: Up to 25 points
+
+Calculate the sum of all 4 categories to produce the final "ats_score".
 
 Candidate Resume:
 {resume_text}
 
-CRITICAL: Output ONLY a single raw JSON object matching this exact structure:
+CRITICAL: Output ONLY a single valid raw JSON object matching this exact structure:
 {{
   "ats_score": 80,
   "overall_summary": "Audit summary text...",
@@ -153,12 +169,12 @@ CRITICAL: Output ONLY a single raw JSON object matching this exact structure:
   "impact_and_content_gaps": ["gap 1", "gap 2"],
   "actionable_recommendations": ["recommendation 1", "recommendation 2"]
 }}
-Do NOT wrap in extra prose. Respond only with the JSON object.
+Do NOT output preambles, notes, or markdown wrappers. Output JSON only.
 """
 
     task = Task(
         description=prompt,
-        expected_output="Valid JSON matching the required structure.",
+        expected_output="Valid JSON matching the required schema.",
         agent=evaluator
     )
 
