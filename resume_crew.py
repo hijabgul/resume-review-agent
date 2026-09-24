@@ -1,7 +1,8 @@
 """
 resume_crew.py
 --------------
-Handles crew setup and execution with robust JSON parsing using OpenAI GPT-OSS 120B on Groq.
+Handles crew setup and execution with robust JSON parsing and control-character 
+sanitizing for Groq and OpenAI models.
 """
 
 import json
@@ -37,12 +38,12 @@ class StandaloneATSEvaluation(BaseModel):
 # ---------------------------------------------------------------------------
 def clean_and_parse_json(raw_output: str, target_class: Type[BaseModel]) -> BaseModel:
     """
-    Cleans raw LLM text (removing markdown blocks and conversational preambles)
-    and parses it into the target Pydantic model.
+    Cleans raw LLM text (removing markdown blocks and conversational preambles),
+    handles unescaped control characters (newlines/tabs), and parses into Pydantic.
     """
     text = str(raw_output).strip()
 
-    # Extract JSON string inside markdown block if present
+    # Extract JSON string inside markdown code blocks if present
     json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
     if json_match:
         text = json_match.group(1)
@@ -52,11 +53,18 @@ def clean_and_parse_json(raw_output: str, target_class: Type[BaseModel]) -> Base
         if brace_match:
             text = brace_match.group(0)
 
+    # Attempt parsing with strict=False to handle raw control characters like \n
     try:
-        data = json.loads(text)
+        data = json.loads(text, strict=False)
         return target_class(**data)
     except (json.JSONDecodeError, ValidationError) as e:
-        raise ValueError(f"The AI's response wasn't valid JSON ({str(e)}). Raw response: {text[:200]}...")
+        # Fallback sanitization if unescaped literal linebreaks break JSON syntax
+        try:
+            cleaned_text = re.sub(r'[\r\n\t]+', ' ', text)
+            data = json.loads(cleaned_text, strict=False)
+            return target_class(**data)
+        except Exception:
+            raise ValueError(f"The AI's response wasn't valid JSON ({str(e)}). Raw response: {text[:200]}...")
 
 
 # ---------------------------------------------------------------------------
