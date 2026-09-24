@@ -10,10 +10,12 @@ Everything a student needs to change (API key, model name) lives in
 Streamlit secrets, not here.
 """
 
+import json
+import re
 from typing import List
 
 from crewai import Agent, Task, Crew, Process, LLM
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 # ---------------------------------------------------------------------------
 # 1. The shape of the answer we want back from the AI (structured output).
@@ -108,15 +110,32 @@ def build_crew(api_key: str) -> Crew:
             "STRICT RULE: Never state or imply the candidate has a skill, tool, "
             "degree, certification, or years of experience that is not explicitly "
             "stated or clearly implied in the resume text. When in doubt, treat it "
-            "as missing rather than assumed."
+            "as missing rather than assumed.\n\n"
+            "OUTPUT FORMAT — this is critical:\n"
+            "Respond with ONLY a single valid JSON object. No markdown code fences, "
+            "no ```json, no commentary or explanation before or after it — just the "
+            "raw JSON object, starting with { and ending with }. It must have exactly "
+            "these keys:\n"
+            '  "match_score": integer from 0 to 100\n'
+            '  "overall_summary": string, 3-5 sentences\n'
+            '  "matching_qualifications": array of strings\n'
+            '  "missing_or_weak_areas": array of strings\n'
+            '  "recommendations": array of strings\n'
+            '  "ats_keywords_to_add": array of strings\n'
         ),
         expected_output=(
-            "A structured evaluation with match_score, overall_summary, "
-            "matching_qualifications, missing_or_weak_areas, recommendations, "
-            "and ats_keywords_to_add."
+            "A single raw JSON object (no markdown fences, no extra text) with the "
+            "keys match_score, overall_summary, matching_qualifications, "
+            "missing_or_weak_areas, recommendations, and ats_keywords_to_add."
         ),
         agent=analyst,
-        output_pydantic=ResumeEvaluation,
+        # Note: intentionally NOT using output_pydantic here. CrewAI's
+        # output_pydantic uses function/tool-calling to force structured
+        # output, and some Groq-hosted models (including gpt-oss-120b at
+        # the time of writing) throw "Tool choice is none, but model
+        # called a tool" errors with that path. Prompting for raw JSON
+        # and parsing it ourselves (see _extract_json / run_resume_review
+        # below) avoids that bug entirely and is more robust.
     )
 
     return Crew(
@@ -125,6 +144,25 @@ def build_crew(api_key: str) -> Crew:
         process=Process.sequential,
         verbose=False,
     )
+
+
+def _extract_json(raw_text: str) -> dict:
+    """
+    Pulls a JSON object out of the model's raw text reply, even if it
+    wrapped the JSON in ```json fences or added stray text around it.
+    """
+    text = raw_text.strip()
+
+    fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1)
+    else:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+
+    return json.loads(text)
 
 
 def run_resume_review(resume_text: str, job_description: str, api_key: str) -> ResumeEvaluation:
@@ -140,8 +178,19 @@ def run_resume_review(resume_text: str, job_description: str, api_key: str) -> R
         "job_description": job_description.strip(),
     })
 
-    if result.pydantic is None:
+    raw_text = getattr(result, "raw", None) or str(result)
+
+    try:
+        data = _extract_json(raw_text)
+    except (json.JSONDecodeError, ValueError) as exc:
         raise ValueError(
-            "The AI did not return a structured result. Please try again."
-        )
-    return result.pydantic
+            "The AI's response wasn't valid JSON, so it couldn't be read. "
+            "Please try again."
+        ) from exc
+
+    try:
+        return ResumeEvaluation(**data)
+    except ValidationError as exc:
+        raise ValueError(
+            f"The AI's response didn't match the expected format: {exc}"
+        ) from exc
