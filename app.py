@@ -274,7 +274,7 @@ with left_col:
             "Resume text",
             height=280,
             placeholder="Paste the full resume text here...",
-           color=white,
+          
         )
     else:
         uploaded_pdf = st.file_uploader("Upload resume PDF", type=["pdf"], label_visibility="collapsed")
