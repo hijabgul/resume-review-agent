@@ -1,16 +1,15 @@
 """
 resume_crew.py
 --------------
-Handles crew setup and execution with robust JSON parsing for Groq models.
+Handles crew setup and execution with robust JSON parsing using OpenAI GPT-OSS 120B on Groq.
 """
 
 import json
 import re
-from typing import List, Dict, Any, Type
+from typing import List, Type
 from pydantic import BaseModel, Field, ValidationError
 
-from crewai import Agent, Task, Crew, Process
-from langchain_groq import ChatGroq
+from crewai import Agent, Task, Crew, Process, LLM
 
 
 # ---------------------------------------------------------------------------
@@ -64,9 +63,9 @@ def clean_and_parse_json(raw_output: str, target_class: Type[BaseModel]) -> Base
 # Review Execution Functions
 # ---------------------------------------------------------------------------
 def run_resume_review(resume_text: str, job_description: str, api_key: str) -> ResumeEvaluation:
-    llm = ChatGroq(
+    llm = LLM(
+        model="groq/openai/gpt-oss-120b",
         api_key=api_key,
-        model_name="llama-3.1-70b-versatile",
         temperature=0.2
     )
 
@@ -117,9 +116,9 @@ Do NOT wrap in extra prose. Respond only with the JSON object.
 
 
 def run_standalone_ats_review(resume_text: str, api_key: str) -> StandaloneATSEvaluation:
-    llm = ChatGroq(
+    llm = LLM(
+        model="groq/openai/gpt-oss-120b",
         api_key=api_key,
-        model_name="llama-3.1-70b-versatile",
         temperature=0.2
     )
 
