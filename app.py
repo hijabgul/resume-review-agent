@@ -64,12 +64,12 @@ st.markdown(
         .hero-title {
             font-size: 2.1rem;
             font-weight: 700;
-            color: #F1F5F9;
-            margin-bottom: 0.3rem;
+            color: #FFFFFF;
+            margin-bottom: 0.8rem;
         }
         .hero-subtitle {
             font-size: 1.02rem;
-            color: #94A3B8;
+            color: #E5E7EB;
             max-width: 760px;
             line-height: 1.55;
         }
