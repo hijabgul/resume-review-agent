@@ -21,7 +21,7 @@ st.set_page_config(
 )
 
 # ---------------------------------------------------------------------------
-# Custom CSS
+# Custom CSS — High Contrast & Clean UI
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -79,7 +79,7 @@ st.markdown(
             border: 1px solid rgba(45,212,191,0.35);
         }
 
-        /* Section Headings & Label Visibility Fix */
+        /* Section Headings */
         .section-header {
             color: #38BDF8 !important;
             font-size: 1.2rem;
@@ -95,16 +95,40 @@ st.markdown(
             color: #F1F5F9 !important;
         }
         
-        /* Textarea input contrast */
+        /* Textarea input contrast & placeholder styling */
         textarea {
-            background-color: rgba(15, 23, 42, 0.75) !important;
-            color: #F8FAFC !important;
-            border: 1px solid rgba(148, 163, 184, 0.3) !important;
+            background-color: rgba(15, 23, 42, 0.85) !important;
+            color: #FFFFFF !important;
+            border: 1px solid rgba(148, 163, 184, 0.35) !important;
             border-radius: 10px !important;
+            font-size: 0.95rem !important;
+        }
+        textarea::placeholder {
+            color: #94A3B8 !important; /* Bright, visible placeholder text */
+            opacity: 1 !important;
         }
         textarea:focus {
             border-color: #38BDF8 !important;
             box-shadow: 0 0 0 1px #38BDF8 !important;
+        }
+
+        /* File Uploader styling (PDF Upload Fix) */
+        [data-testid="stFileUploader"] {
+            background-color: rgba(15, 23, 42, 0.85) !important;
+            border: 1px dashed rgba(56, 189, 248, 0.4) !important;
+            border-radius: 12px !important;
+            padding: 1rem !important;
+        }
+        [data-testid="stFileUploader"] label, 
+        [data-testid="stFileUploader"] span, 
+        [data-testid="stFileUploader"] small,
+        [data-testid="stFileUploaderDropzoneInstructions"] div {
+            color: #F8FAFC !important;
+        }
+        [data-testid="stFileUploader"] button {
+            background-color: #1E293B !important;
+            color: #38BDF8 !important;
+            border: 1px solid #38BDF8 !important;
         }
 
         /* Glass cards */
@@ -172,11 +196,15 @@ st.markdown(
             margin-bottom: 1rem;
         }
 
-        /* Amber / Warning output overrides */
-        .stAlert {
-            background-color: rgba(30, 41, 59, 0.85) !important;
+        /* Alert / Warning Boxes Visibility Fix */
+        .stAlert, [data-testid="stNotification"] {
+            background-color: #1E293B !important;
             color: #F8FAFC !important;
             border: 1px solid #F59E0B !important;
+            border-radius: 10px !important;
+        }
+        .stAlert p {
+            color: #F8FAFC !important;
         }
 
         /* Buttons */
@@ -274,7 +302,7 @@ with left_col:
             "Resume text",
             height=280,
             placeholder="Paste the full resume text here...",
-          
+            label_visibility="collapsed",
         )
     else:
         uploaded_pdf = st.file_uploader("Upload resume PDF", type=["pdf"], label_visibility="collapsed")
